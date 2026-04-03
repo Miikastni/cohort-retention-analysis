@@ -75,7 +75,8 @@ WITH cohort_retention AS ( SELECT
                 PARTITION BY cohort_month
                 ORDER BY month_number
             ), 2
-        ))
+        ) as retention_rate
+    FROM cohort_counts) 
 
 SELECT
     month_number,
@@ -99,7 +100,7 @@ WITH cohort_retention AS ( SELECT
                 PARTITION BY cohort_month
                 ORDER BY month_number
             ), 2
-        )) 
+        ) FROM cohort_counts) 
 SELECT  cohort_month, 
         ROUND(AVG(retention_rate), 2 ) AS avg_retention 
 FROM cohort_retention 
