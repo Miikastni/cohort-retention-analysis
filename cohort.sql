@@ -10,7 +10,7 @@ WITH cohorts AS (
 
 cohort_data AS (
     SELECT
-        r.CustomerID,
+        DISTINCT r.CustomerID,
         DATE_TRUNC('month', r.InvoiceDate) AS order_month,
         c.cohort_month
     FROM retail_clean r
