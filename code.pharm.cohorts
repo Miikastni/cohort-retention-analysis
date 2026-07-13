@@ -1,0 +1,96 @@
+--Проверка исходных данных
+SELECT *
+  FROM checks
+  WHERE card LIKE '2000%' 
+    AND summ_with_disc > 0
+    AND datetime BETWEEN '2000-01-01' AND CURRENT_DATE
+  ORDER BY card, datetime
+  
+--Анализ длительности наблююдения по когортам
+WITH cohort_data AS (SELECT 
+       card,
+       datetime,
+       date_trunc('month', first_value(datetime) OVER (PARTITION BY card ORDER BY datetime))::date AS cohort,
+       summ_with_disc 
+FROM checks
+WHERE card LIKE '2000%' 
+    AND summ_with_disc > 0
+    AND datetime BETWEEN '2000-01-01' AND CURRENT_DATE
+    )
+SELECT 
+       cohort,
+       min(datetime)::date AS first_purchase_date,
+       max(datetime)::date AS last_purchase_date,
+      (max(datetime)::date - min(datetime)::date + 1) AS cohort_duration_days,
+       count(DISTINCT card) AS customers_count
+FROM cohort_data
+WHERE cohort NOT IN ('2021-07-01', '2022-06-01')
+GROUP BY cohort
+ORDER BY cohort
+
+--Определение общей точки насыщения
+WITH cohort_days AS (SELECT 
+       card,
+       datetime,
+       first_value(datetime) OVER (PARTITION BY card ORDER BY datetime)::date AS first_purchases_date,
+       datetime::date - first_value(datetime::date) OVER (PARTITION BY card ORDER BY datetime) AS days_from_first,
+       date_trunc('month', first_value(datetime) OVER (PARTITION BY card ORDER BY datetime))::date AS cohort,
+       summ_with_disc 
+FROM checks
+WHERE card LIKE '2000%' 
+    AND summ_with_disc > 0
+    AND datetime BETWEEN '2000-01-01' AND CURRENT_DATE
+    ),
+cte_daily_revenue AS (SELECT 
+       cohort,
+       days_from_first,
+       sum(summ_with_disc) AS daily_revenue_by_cohort
+FROM cohort_days  
+WHERE cohort NOT IN ('2021-07-01', '2022-06-01')
+GROUP BY days_from_first, cohort
+ORDER BY days_from_first
+),
+cumulative_revenue AS (SELECT 
+       cohort,
+       days_from_first,
+       daily_revenue_by_cohort,
+       sum(daily_revenue_by_cohort) OVER (PARTITION BY cohort) AS cohort_total_revenue,
+       sum(daily_revenue_by_cohort) OVER (PARTITION BY cohort ORDER BY days_from_first ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) / 
+       sum(daily_revenue_by_cohort) OVER (PARTITION BY cohort) AS cumulative_pct
+FROM cte_daily_revenue
+)
+SELECT 
+       cohort,
+       min(days_from_first) AS day_80pct_cohort_revenue
+FROM cumulative_revenue
+WHERE cumulative_pct >= 0.80
+GROUP BY cohort
+
+--Основной запрос
+WITH cohort_days AS (SELECT 
+       card,
+       datetime,
+       first_value(datetime) OVER (PARTITION BY card ORDER BY datetime)::date AS first_purchases_date,
+       datetime::date - first_value(datetime::date) OVER (PARTITION BY card ORDER BY datetime) AS days_from_first,
+       date_trunc('month', first_value(datetime) OVER (PARTITION BY card ORDER BY datetime))::date AS cohort,
+       summ_with_disc 
+FROM checks
+WHERE card LIKE '2000%' 
+    AND summ_with_disc > 0
+    AND datetime BETWEEN '2000-01-01' AND CURRENT_DATE
+)
+SELECT 
+     cohort,
+     max(days_from_first) AS max_days_from_first,
+     count(DISTINCT card) AS customers_count,
+     round(sum(CASE WHEN days_from_first = 0 then summ_with_disc end) / count(DISTINCT card)) AS "0_day",
+    round (CASE WHEN max(days_from_first) >= 30 THEN sum(CASE WHEN  days_from_first <= 30 then summ_with_disc end) / count(DISTINCT card) end) AS "30_day",
+    round (CASE WHEN max(days_from_first) >= 60 THEN sum(CASE WHEN days_from_first <= 60 then summ_with_disc end) / count(DISTINCT card) end) AS "60_day",
+    round (CASE WHEN max(days_from_first) >= 90 THEN sum(CASE WHEN days_from_first <= 90 then summ_with_disc end) / count(DISTINCT card) end) AS "90_day",
+    round (CASE WHEN max(days_from_first) >= 120 THEN sum(CASE WHEN days_from_first <= 120 then summ_with_disc end) / count(DISTINCT card) end) AS "120_day",
+    round (CASE WHEN max(days_from_first) >= 150 THEN sum(CASE WHEN days_from_first <= 150 then summ_with_disc end) / count(DISTINCT card) end) AS "150_day",
+    round (CASE WHEN max(days_from_first) >= 180 THEN sum(CASE WHEN days_from_first <= 180 then summ_with_disc end) / count(DISTINCT card) end) AS "180_day"
+FROM cohort_days  
+WHERE cohort NOT IN ('2021-07-01', '2022-06-01')
+GROUP BY cohort
+ORDER BY cohort
